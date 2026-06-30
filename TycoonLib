@@ -1,0 +1,237 @@
+local tycoonLib = {}
+local repStorage = game:GetService("ReplicatedStorage")
+
+local serverStorage = game:GetService("ServerStorage")
+local remoteEvents = repStorage:WaitForChild("Events")
+
+local dataLib = require(serverStorage:WaitForChild("Scripts").DataLib)
+local playerLib = require(serverStorage:WaitForChild("Scripts").PlayerLib)
+local DataStoreService = game:GetService("DataStoreService")
+local animationLib = require(repStorage:WaitForChild("Scripts").AnimationLib)
+local TycoonBuy = remoteEvents:WaitForChild("TycoonBuyClient")
+-- Default values for new tycoons
+local DefaultTycoon = 
+	{
+	leaderstats = {checkpointValue = 1,Money = 1000},
+		tycoonLevel = {Station = 0,Collector = 1,Collected = 0,Wall = 0,StationData = 
+			{
+				[1]={Dropper = 0,Upgrader = 0},
+				[2]={Dropper = 0,Upgrader = 0},
+				[3]={Dropper = 0,Upgrader = 0},
+				[4]={Dropper = 0,Upgrader = 0},
+				[5]={Dropper = 0,Upgrader = 0},
+				[6]={Dropper = 0,Upgrader = 0},
+			}
+		}
+	
+	}
+
+local DefaultStation =
+	{
+		Dropper = 0,
+		Upgrader = 0
+	}
+-- values for levels and prices
+local Prices = 
+{
+	Dropper = {0,25,100,150,},
+	Station = {0,0,0,0,0,0,0,0,0},
+	Upgrader = {1,1,1},
+	Wall = {1,2,5,7,3,4,5,16},
+	Stairs = {10}
+	
+}
+-- level of concureny for each object type
+local Levels = 
+	{
+		Dropper = {1,2,3,4,},
+		Upgrader = {2,4,6}
+		
+	}
+-- return obj in repStorage
+function tycoonLib.ReturnObj(objName)
+	return require(serverStorage.Scripts:WaitForChild(objName.."Script"))
+end
+-- caluates the price by seeing what level the player is on
+function tycoonLib.PriceCalu(ObjName,ObjsOwned)
+
+	local price = Prices[ObjName][ObjsOwned]
+	
+	if price == nil then
+		warn("Array index out of bound for price. "..ObjName.." Index = "..tostring(price))
+		return 
+	end
+	
+	return price
+end
+
+function tycoonLib.LevelCalu(objName,levelLocation,index)
+	if typeof(levelLocation) == "number" then
+		return Levels[objName][levelLocation]
+	end 
+	return Levels[objName][index]
+end
+
+function tycoonLib.IncrementData(tycoonData,StationNumber,objName)
+	if tycoonData[objName] == nil then
+		tycoonData["StationData"][StationNumber][objName] += 1
+		return 
+	end
+	print(tycoonData[objName])
+	tycoonData[objName] += 1
+end
+
+function tycoonLib.GetValue(tycoonData,StationNumber,objName)
+	if tycoonData[objName] == nil then
+		return tycoonData["StationData"][StationNumber][objName]
+	end
+	return tycoonData[objName]
+end
+
+function tycoonLib.BillboardDisplay(str)
+	return repStorage:WaitForChild(str):Clone()
+end
+
+------------------------------------------------------------------------------------------------------------------------------------------
+
+function tycoonLib.TouchBuy(objInstance,objName,callbackFun,StationNumber)
+	warn(objInstance.Name)
+	local Location = objInstance.Location
+	local player = objInstance.Player
+	local tycoonData = objInstance.TycoonData
+	
+	local index = tycoonLib.GetValue(tycoonData,StationNumber,objName) + 1
+	local buyPartForObj = Location["BuyParts"][objName]:FindFirstChild(objName..tostring(index))
+	
+	
+	if not buyPartForObj then
+		warn("No more "..objName.." parts to buy")
+		return 
+	end
+	
+	buyPartForObj.CanTouch = true
+	buyPartForObj.Transparency = 0
+	
+	local connection
+	
+	local price = tycoonLib.PriceCalu(objName,index)
+	local priceDisplay = tycoonLib.BillboardDisplay("Price")
+	priceDisplay.TextLabel.Text = tostring(price.." $")
+	priceDisplay.Parent = buyPartForObj
+	TycoonBuy:FireAllClients(player)
+	
+	connection = buyPartForObj.Touched:Connect(function(hit)	
+		if playerLib.CheckforPlayer(hit,player) and tycoonLib.Transaction(player,price) then
+			tycoonLib.IncrementData(tycoonData,StationNumber,objName)
+			connection:Disconnect()
+			buyPartForObj:Destroy()
+			callbackFun()
+		end
+	end)
+end
+
+function tycoonLib.Transaction(player,price)
+	if player.leaderstats.Money.Value >= price then
+		player.leaderstats.Money.Value -= price
+		print("Something Bought")
+		return true
+	else
+		print("Not enough moneys")
+		return false
+	end
+end 
+
+function tycoonLib.ObjsOwnedCount(LevelLocation,objName)
+	return LevelLocation[objName]
+end
+
+-- all the callback functions for the touchbuy function
+
+function tycoonLib.Station(TycoonInstance)
+	local TycoonData = TycoonInstance.TycoonData
+	
+	local objName = "Station"
+	
+	tycoonLib.TouchBuy(TycoonInstance,objName,function()
+		local StationObj = tycoonLib.ReturnObj(objName).new(TycoonInstance,TycoonData["Station"])
+		StationObj:Setup()
+	end)
+end
+
+function tycoonLib.Wall(TycoonInstance)
+	local TycoonData = TycoonInstance.TycoonData
+	local TycoonBuilding = TycoonInstance.Tycoon.Building
+	local WALLLIMIT = 4 * TycoonData.Station
+	
+	if TycoonData.Wall == WALLLIMIT then
+		tycoonLib.Stairs(TycoonInstance)
+		return
+	end
+	
+	tycoonLib.TouchBuy(TycoonInstance,"Wall",function()
+		tycoonLib.ReturnObj("Wall").new(TycoonBuilding["Wall"..tostring(TycoonData.Wall)]):SpawnObj()
+		tycoonLib.Wall(TycoonInstance)	
+	end)	
+end
+---
+
+function tycoonLib.Collection(TycoonInstance)
+	local Collection = TycoonInstance.Location.Collection
+	local player = TycoonInstance.Player
+	local touchedByHumanoid = false
+	
+	local function timerTask()
+		task.wait(5)
+		touchedByHumanoid = false
+	end
+	
+	
+	for i,v in pairs(Collection:GetChildren()) do
+		local collecitonPad = v:FindFirstChild("CollectionPad")
+		collecitonPad.Touched:Connect(function(hit)
+			if playerLib.CheckforPlayer(hit,player) and touchedByHumanoid == false then
+				touchedByHumanoid = true
+				task.spawn(timerTask)
+				player.leaderstats.Money.Value += TycoonInstance.TycoonCollected
+				TycoonInstance.TycoonCollected = 0
+				tycoonLib.UpdateDisplay(TycoonInstance)
+			end
+		end)
+		
+		collecitonPad.TouchEnded:Connect(function(hit) 
+			if playerLib.CheckforPlayer(hit,player) and touchedByHumanoid == true then
+				touchedByHumanoid = false 
+				print("touched ENDEDEDEDED")
+			end
+		end )
+	end
+	
+end
+
+function tycoonLib.UpdateDisplay(TycoonInstance)
+	for I,v in pairs(TycoonInstance.Location.Collection:GetChildren()) do
+		v:FindFirstChild("SurfaceGui").TextLabel.Text = "$"..TycoonInstance.TycoonCollected
+	end
+end
+
+function tycoonLib.ReachedLimit(TycoonInstance,objName)
+	local TycoonData = TycoonInstance.TycoonData
+	local currentStationData = TycoonData.StationData[TycoonData.Station][objName]
+	-- make dropperlimit more modular when needs be 
+	if currentStationData % TycoonInstance.DropperLimit == 0 and currentStationData ~= 0 then
+		return true
+	end
+	return false
+end
+
+function tycoonLib.Stairs(TycoonInstance)
+	tycoonLib.TouchBuy(TycoonInstance,"Stairs",function()
+		tycoonLib.ReturnObj("Stairs").new(TycoonInstance):SpawnObj()
+	end)
+end
+
+function tycoonLib.Obby(tycoonInstance,name)
+	
+end
+
+return tycoonLib
