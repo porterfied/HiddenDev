@@ -1,0 +1,74 @@
+-- tycoon code
+-- used on server side
+local serverStorage = game:GetService("ServerStorage")
+
+local collectionService = game:GetService("CollectionService")
+local tycoonLib = require(serverStorage:WaitForChild("Scripts").TycoonLib)
+local dataLib = require(serverStorage:WaitForChild("Scripts").DataLib)
+local RunService = game:GetService("RunService")
+local players = game:GetService("Players")
+
+local tycoonScript = require(serverStorage:WaitForChild("Scripts"):WaitForChild("TycoonScript"))
+local spawnParts = workspace.TycoonSpawn:GetChildren()
+local saveDataTimer = 0
+local activeTycoonsInstances = {}
+
+for i,v in pairs(spawnParts) do
+local touchedByHumanoid = false
+		v.Touched:Connect(function(hit)
+			if hit.Parent:FindFirstChild("HumanoidRootPart") and not touchedByHumanoid then
+				
+			touchedByHumanoid = true
+			local player = game.Players:GetPlayerFromCharacter(hit.Parent)
+			
+			if 	activeTycoonsInstances[player.UserId] == nil then
+				v.CanTouch = false
+				v.CanCollide = false
+				v.Transparency = 1
+				task.wait(1)	
+				
+				local tycoonObj = tycoonScript.new(player)
+				activeTycoonsInstances[player.UserId] = tycoonObj
+
+				if v:FindFirstChild("Location") then
+					tycoonObj:Spawn(v:FindFirstChild("Location"))
+				end
+			else
+				warn("Player already owned a tycoon")
+				touchedByHumanoid = false
+				return
+			end			
+		end
+	end)
+end
+
+
+players.PlayerRemoving:Connect(function(player)
+	dataLib.SaveAllData(player,activeTycoonsInstances[player.UserId].TycoonData)
+	activeTycoonsInstances[player.UserId].Tycoon:Destroy()
+	table.remove(activeTycoonsInstances,player.UserId)
+end)
+
+RunService.Heartbeat:Connect(function(deltaTime)
+
+	saveDataTimer += deltaTime
+	if saveDataTimer >= 10 then
+		saveDataTimer = 0
+		for i,v in pairs(activeTycoonsInstances) do
+			dataLib.SaveAllData(v.Player,v.TycoonData)
+		end
+	end
+end)
+
+
+local DeathParts = collectionService:GetTagged("Death")
+
+
+for i,deathPart in pairs(DeathParts) do
+	deathPart.Touched:Connect(function(hit)
+		local humanoid = hit.Parent:FindFirstChild("Humanoid")
+		if humanoid then
+			humanoid.Health = 0
+		end
+	end)
+end
