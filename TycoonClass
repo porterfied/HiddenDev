@@ -1,0 +1,56 @@
+local tycoon = {}
+local serverStorage = game:GetService("ServerStorage")
+local tycoonLib = require(serverStorage:WaitForChild("Scripts").TycoonLib)
+local dataLib = require(serverStorage:WaitForChild("Scripts").DataLib)
+
+tycoon.__index = tycoon
+
+function tycoon.new(player)
+	local self = setmetatable({},tycoon)
+	self.Name = "Tycoon"
+	self.LevelLocation = {"tycoonLevel"}
+	self.Tycoon = serverStorage:WaitForChild("Models").Tycoon:Clone()
+	self.Player = player
+	self.DropperLimit = 3
+	self.WallLimit = 4
+	self.UpgraderLimit = 2
+	self.WallLimit = 4
+	self.GlobalConnections = {}
+	self.Location = self.Tycoon
+	-- gets data from dataStore
+	local Data = dataLib.GetDataForClass(self.Player.UserId,self.LevelLocation)
+	self.TycoonData = Data
+	
+	self.TycoonCollected = self.TycoonData["Collected"]
+	
+	self.Tycoon.Name = self.Player.UserId
+	return self
+end
+
+function tycoon:Spawn(spawnLocation)	
+	
+	self.Tycoon.Parent = game.Workspace
+	self.Tycoon:PivotTo(CFrame.new(spawnLocation.Position))
+	local StationCount = self.TycoonData["Station"]
+	local WallCount = self.TycoonData["Wall"]
+	local StairsCount = self.TycoonData["Stairs"]
+	print(WallCount)
+	if StationCount < 1 then
+		print("here now")
+		tycoonLib.Station(self,1)
+	end
+	-- function to spawn whats already been Upgraded/Bought or anything that the player starts out with when player joins or first Touches Claim block
+	for i = 1, StationCount,1 do
+		tycoonLib.ReturnObj("Station").new(self,i):Setup()
+	end
+	for i = 1, WallCount, 1 do
+		tycoonLib.ReturnObj("Wall").new(self.Tycoon.Building["Wall"..tostring(i)]):SpawnObj()
+	end
+	for i = 1 ,StairsCount ,1 do
+		tycoonLib.ReturnObj("Stairs").new(self):SpawnObj()
+	end
+	
+	tycoonLib.Collection(self)
+end
+
+return tycoon
